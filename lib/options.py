@@ -106,3 +106,47 @@ class EuropeanCall(BaseOption):
             return torch.clamp(x[:,0]-self.K, 0).unsqueeze(1) # (batch_size, 1)
         else:
             raise ValueError('x needs to be last spot price, or trajectory of prices')
+
+class LookbackCall(BaseOption):
+    def __init__(self, idx_traded: List[int] = None):
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        if self.idx_traded:
+            basket = torch.sum(x[..., self.idx_traded], 2)
+        else:
+            basket = torch.sum(x, 2)
+        payoff = basket[:, -1] - torch.min(basket, 1)[0]
+        return payoff.unsqueeze(1)
+
+
+class UpAndOutCall(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_out = torch.max(path, dim=1)[0] >= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(terminal - self.K, min=0.0)
+        payoff = payoff * (~knocked_out)
+        return payoff.unsqueeze(1)
+
+
+class DownAndOutCall(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_out = torch.min(path, dim=1)[0] <= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(terminal - self.K, min=0.0)
+        payoff = payoff * (~knocked_out)
+        return payoff.unsqueeze(1)
+
+
