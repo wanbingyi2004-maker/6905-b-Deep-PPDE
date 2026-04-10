@@ -149,4 +149,91 @@ class DownAndOutCall(BaseOption):
         payoff = payoff * (~knocked_out)
         return payoff.unsqueeze(1)
 
+class DownAndInCall(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
 
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_in = torch.min(path, dim=1)[0] <= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(terminal - self.K, min=0.0)
+        payoff = payoff * knocked_in
+        return payoff.unsqueeze(1)
+
+
+class UpAndInCall(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_in = torch.max(path, dim=1)[0] >= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(terminal - self.K, min=0.0)
+        payoff = payoff * knocked_in
+        return payoff.unsqueeze(1)
+
+
+class DownAndOutPut(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_out = torch.min(path, dim=1)[0] <= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(self.K - terminal, min=0.0)
+        payoff = payoff * (~knocked_out)
+        return payoff.unsqueeze(1)
+
+
+class DownAndInPut(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_in = torch.min(path, dim=1)[0] <= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(self.K - terminal, min=0.0)
+        payoff = payoff * knocked_in
+        return payoff.unsqueeze(1)
+
+
+class UpAndOutPut(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_out = torch.max(path, dim=1)[0] >= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(self.K - terminal, min=0.0)
+        payoff = payoff * (~knocked_out)
+        return payoff.unsqueeze(1)
+
+
+class UpAndInPut(BaseOption):
+    def __init__(self, K, B, idx_traded: int = 0):
+        self.K = K
+        self.B = B
+        self.idx_traded = idx_traded
+
+    def payoff(self, x):
+        path = x[:, :, self.idx_traded]
+        knocked_in = torch.max(path, dim=1)[0] >= self.B
+        terminal = path[:, -1]
+        payoff = torch.clamp(self.K - terminal, min=0.0)
+        payoff = payoff * knocked_in
+        return payoff.unsqueeze(1)
