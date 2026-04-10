@@ -8,16 +8,16 @@ import math
 import matplotlib.pyplot as plt
 
 from lib.bsde import PPDE_BlackScholes as PPDE
-from lib.options import UpAndOutCall, DownAndOutCall
+from lib.options import (
+    UpAndOutCall, DownAndOutCall,
+    DownAndInCall, UpAndInCall,
+    DownAndOutPut, DownAndInPut,
+    UpAndOutPut, UpAndInPut
+)
 
 
-def sample_x0(batch_size, dim, device):
-    sigma = 0.3
-    mu = 0.08
-    tau = 0.1
-    z = torch.randn(batch_size, dim, device=device)
-    x0 = torch.exp((mu - 0.5 * sigma**2) * tau + 0.3 * math.sqrt(tau) * z)
-    return x0
+def sample_x0(batch_size, dim, device, S0=1.0):
+    return torch.full((batch_size, dim), S0, device=device)
 
 
 def write(msg, logfile, pbar):
@@ -25,6 +25,27 @@ def write(msg, logfile, pbar):
     with open(logfile, "a") as f:
         f.write(msg)
         f.write("\n")
+
+
+def build_option(option_type, K, B):
+    if option_type == "up_out_call":
+        return UpAndOutCall(K=K, B=B, idx_traded=0)
+    elif option_type == "down_out_call":
+        return DownAndOutCall(K=K, B=B, idx_traded=0)
+    elif option_type == "down_in_call":
+        return DownAndInCall(K=K, B=B, idx_traded=0)
+    elif option_type == "up_in_call":
+        return UpAndInCall(K=K, B=B, idx_traded=0)
+    elif option_type == "down_out_put":
+        return DownAndOutPut(K=K, B=B, idx_traded=0)
+    elif option_type == "down_in_put":
+        return DownAndInPut(K=K, B=B, idx_traded=0)
+    elif option_type == "up_out_put":
+        return UpAndOutPut(K=K, B=B, idx_traded=0)
+    elif option_type == "up_in_put":
+        return UpAndInPut(K=K, B=B, idx_traded=0)
+    else:
+        raise ValueError("Unsupported option_type")
 
 
 def train(T,
@@ -43,17 +64,12 @@ def train(T,
           method,
           option_type,
           K,
-          B):
+          B,
+          S0):
 
     logfile = os.path.join(base_dir, "log.txt")
     ts = torch.linspace(0, T, n_steps + 1, device=device)
-
-    if option_type == "up_out_call":
-        option = UpAndOutCall(K=K, B=B, idx_traded=0)
-    elif option_type == "down_out_call":
-        option = DownAndOutCall(K=K, B=B, idx_traded=0)
-    else:
-        raise ValueError("option_type must be 'up_out_call' or 'down_out_call'")
+    option = build_option(option_type, K, B)
 
     ppde = PPDE(d, mu, sigma, depth, rnn_hidden, ffn_hidden)
     ppde.to(device)
@@ -66,7 +82,7 @@ def train(T,
 
     for idx in range(max_updates):
         optimizer.zero_grad()
-        x0 = sample_x0(batch_size, d, device)
+        x0 = sample_x0(batch_size, d, device, S0=S0)
 
         if method == "bsde":
             loss, _, _ = ppde.fbsdeint(ts=ts, x0=x0, option=option, lag=lag)
@@ -80,14 +96,14 @@ def train(T,
 
         if (idx + 1) % 10 == 0:
             with torch.no_grad():
-                x0 = torch.ones(5000, d, device=device)
-                loss, Y, payoff = ppde.fbsdeint(ts=ts, x0=x0, option=option, lag=lag)
+                x0_test = sample_x0(5000, d, device, S0=S0)
+                loss_test, Y, payoff = ppde.fbsdeint(ts=ts, x0=x0_test, option=option, lag=lag)
                 payoff = torch.exp(-mu * ts[-1]) * payoff.mean()
 
             pbar.update(10)
             write(
                 "loss={:.4f}, Monte Carlo price={:.4f}, predicted={:.4f}".format(
-                    loss.item(), payoff.item(), Y[0, 0, 0].item()
+                    loss_test.item(), payoff.item(), Y[0, 0, 0].item()
                 ),
                 logfile,
                 pbar
@@ -99,10 +115,9 @@ def train(T,
     }
     torch.save(result, os.path.join(base_dir, "result.pth.tar"))
 
-    # Evaluation
-    x0 = torch.ones(1, d, device=device)
+    x0_eval = sample_x0(1, d, device, S0=S0)
     with torch.no_grad():
-        x, _ = ppde.sdeint(ts=ts, x0=x0)
+        x, _ = ppde.sdeint(ts=ts, x0=x0_eval)
 
     fig, ax = plt.subplots()
     ax.plot(ts.cpu().numpy(), x[0, :, 0].cpu().numpy())
@@ -110,7 +125,7 @@ def train(T,
     fig.savefig(os.path.join(base_dir, "path_eval.pdf"))
 
     pred, mc_pred = [], []
-    for idx, t in enumerate(ts[::lag]):
+    for idx, _ in enumerate(ts[::lag]):
         pred.append(ppde.eval(ts=ts, x=x[:, :(idx * lag) + 1, :], lag=lag).detach())
         mc_pred.append(
             ppde.eval_mc(
@@ -145,7 +160,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', default=1, type=int)
 
     parser.add_argument('--batch_size', default=500, type=int)
-    parser.add_argument('--d', default=4, type=int)
+    parser.add_argument('--d', default=1, type=int)
     parser.add_argument('--max_updates', default=5000, type=int)
     parser.add_argument('--ffn_hidden', default=[20, 20], nargs="+", type=int)
     parser.add_argument('--rnn_hidden', default=20, type=int)
@@ -157,10 +172,20 @@ if __name__ == "__main__":
     parser.add_argument('--sigma', default=0.3, type=float, help="volatility")
     parser.add_argument('--method', default="bsde", type=str, help="learning method", choices=["bsde", "orthogonal"])
 
-    parser.add_argument('--option_type', default="up_out_call", type=str,
-                        choices=["up_out_call", "down_out_call"])
+    parser.add_argument(
+        '--option_type',
+        default="up_out_call",
+        type=str,
+        choices=[
+            "up_out_call", "down_out_call",
+            "down_in_call", "up_in_call",
+            "down_out_put", "down_in_put",
+            "up_out_put", "up_in_put"
+        ]
+    )
     parser.add_argument('--K', default=1.0, type=float, help="strike")
     parser.add_argument('--B', default=1.2, type=float, help="barrier level")
+    parser.add_argument('--S0', default=1.0, type=float, help="initial asset price")
 
     args = parser.parse_args()
 
@@ -192,4 +217,5 @@ if __name__ == "__main__":
           method=args.method,
           option_type=args.option_type,
           K=args.K,
-          B=args.B)
+          B=args.B,
+          S0=args.S0)
